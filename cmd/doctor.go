@@ -14,7 +14,10 @@ var doctorCmd = &cobra.Command{
 	Short: "Validate project, manifest, templates, versions, and deployment readiness",
 	Args:  cobra.NoArgs,
 	RunE: func(command *cobra.Command, args []string) error {
-		env = ""
+		envName := ""
+		if command.Flags().Changed("env") {
+			envName = env
+		}
 		manifestData, err := config.LoadManifest(manifest)
 		if err != nil {
 			return err
@@ -29,7 +32,7 @@ var doctorCmd = &cobra.Command{
 			Templates:    templatesFlag,
 			Fix:          fix,
 			DryRun:       dryRun,
-			Env:          env,
+			Env:          envName,
 			Connections:  connections,
 			Budgets:      budgets,
 			JSON:         jsonOutput,
@@ -117,7 +120,7 @@ func applyDoctorFixes(manifestData *config.FleetManifest, catalogData *config.Ca
 }
 
 func init() {
-	doctorCmd.Flags().BoolVar(&all, "all", false, "Validate all agents")
+	doctorCmd.Flags().BoolVar(&all, "all", false, "Validate all agents, including template and update checks")
 	doctorCmd.Flags().BoolVar(&updates, "updates", false, "Validate update and lockfile compatibility")
 	doctorCmd.Flags().BoolVar(&templatesFlag, "templates", false, "Validate template rendering behavior")
 	doctorCmd.Flags().BoolVar(&fix, "fix", false, "Plan safe mechanical repairs")

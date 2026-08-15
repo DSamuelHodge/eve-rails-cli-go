@@ -436,3 +436,77 @@ func TestSandboxNetworkPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderSkillUsesCatalogMarkdown(t *testing.T) {
+	temp := t.TempDir()
+	skillDir := filepath.Join(temp, "catalog", "skills")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unique := "Catalog markdown is the source of truth for summarize."
+	if err := os.WriteFile(filepath.Join(skillDir, "summarize.md"), []byte("# summarize\n\n"+unique+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	templateDir := testTemplates(t)
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(temp); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	renderer, err := Load(templateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := renderer.RenderAgent(&testManifest().Agents[0], testManifest(), testCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skillMD string
+	for _, file := range files {
+		if file.Path == "agents/support/agent/skills/summarize.md" {
+			skillMD = file.Content
+		}
+	}
+	if skillMD == "" {
+		t.Fatal("expected generated skill markdown")
+	}
+	if !stringsContains(skillMD, unique) {
+		t.Errorf("expected catalog skill sentence in generated skill, got:\n%s", skillMD)
+	}
+}
+
+func TestSubagentSkillVersionIsCatalogSemver(t *testing.T) {
+	catalog := testCatalog()
+	catalog.Skills["summarize"] = config.CatalogComponent{Version: "1.2.3"}
+	manifest := testManifest()
+	manifest.Agents[0].Subagents = config.SubagentList{
+		{Name: "triage", Skills: []string{"summarize"}},
+	}
+	renderer, err := Load(testTemplates(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := renderer.RenderAgent(&manifest.Agents[0], manifest, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skillMD string
+	for _, file := range files {
+		if file.Path == "agents/support/agent/subagents/triage/skills/summarize.md" {
+			skillMD = file.Content
+		}
+	}
+	if skillMD == "" {
+		t.Fatal("expected generated subagent skill markdown")
+	}
+	if stringsContains(skillMD, "Version: catalog") {
+		t.Errorf("subagent skill must not contain Version: catalog, got:\n%s", skillMD)
+	}
+	if !stringsContains(skillMD, "Version: 1.2.3") {
+		t.Errorf("expected catalog semver Version: 1.2.3, got:\n%s", skillMD)
+	}
+}

@@ -1,13 +1,16 @@
 package doctor
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/DSamuelHodge/eve-rails-cli-go/internal/config"
 	"github.com/DSamuelHodge/eve-rails-cli-go/internal/render"
+	"github.com/DSamuelHodge/eve-rails-cli-go/templates"
 )
 
 // Status is a doctor check status.
@@ -60,6 +63,10 @@ func (report *Report) HasFailures() bool {
 
 // RunDoctor runs the doctor suite against a manifest and catalog.
 func RunDoctor(manifest *config.FleetManifest, catalog *config.CatalogManifest, options Options) (*Report, error) {
+	if options.All {
+		options.Templates = true
+		options.Updates = true
+	}
 	var checks []Check
 	validation := ValidateManifest(manifest, catalog)
 
@@ -320,9 +327,13 @@ func addFixPlanChecks(checks *[]Check, manifest *config.FleetManifest, catalog *
 }
 
 func addTemplateChecks(checks *[]Check, manifest *config.FleetManifest, catalog *config.CatalogManifest, templateDir string) error {
+	addProjectTemplateChecks(checks, templateDir)
 	plan, err := render.PlanBatch(manifest, catalog, templateDir)
 	if err != nil {
-		return err
+		pushCheck(checks, "templates-render", false,
+			"templates render without undefined variables",
+			err.Error())
+		return nil
 	}
 	stale := 0
 	for _, operation := range plan.Operations {
@@ -341,6 +352,40 @@ func addTemplateChecks(checks *[]Check, manifest *config.FleetManifest, catalog 
 		"one or more generated files are missing metadata headers")
 	addRenderedApprovalGateChecks(checks, manifest, catalog, plan)
 	return nil
+}
+
+func addProjectTemplateChecks(checks *[]Check, templateDir string) {
+	names := templates.AgentNames()
+	sort.Strings(names)
+	var missing, drifted []string
+	for _, name := range names {
+		expected, err := templates.AgentContent(name)
+		if err != nil {
+			missing = append(missing, name)
+			continue
+		}
+		actual, err := os.ReadFile(filepath.Join(templateDir, name))
+		if err != nil {
+			missing = append(missing, name)
+			continue
+		}
+		if !bytes.Equal(actual, expected) {
+			drifted = append(drifted, name)
+		}
+	}
+	passed := len(missing) == 0 && len(drifted) == 0
+	var failMessage string
+	switch {
+	case len(missing) > 0 && len(drifted) > 0:
+		failMessage = fmt.Sprintf("missing templates: %s; drifted templates: %s", strings.Join(missing, ","), strings.Join(drifted, ","))
+	case len(missing) > 0:
+		failMessage = fmt.Sprintf("missing templates: %s", strings.Join(missing, ","))
+	default:
+		failMessage = fmt.Sprintf("drifted templates: %s", strings.Join(drifted, ","))
+	}
+	pushCheck(checks, "project-templates-match-embedded", passed,
+		"project templates match embedded agent templates",
+		failMessage)
 }
 
 // addRenderedApprovalGateChecks asserts the approval gate rendered into each
@@ -391,7 +436,10 @@ func gateMatches(content, expected string) bool {
 func addUpdateChecks(checks *[]Check, manifest *config.FleetManifest, catalog *config.CatalogManifest, templateDir string) error {
 	plan, err := render.PlanBatch(manifest, catalog, templateDir)
 	if err != nil {
-		return err
+		pushCheck(checks, "lockfiles-present", false,
+			"agent lockfiles are present",
+			err.Error())
+		return nil
 	}
 	var lockfiles []render.BatchOperation
 	for _, operation := range plan.Operations {

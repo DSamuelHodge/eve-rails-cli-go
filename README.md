@@ -325,6 +325,8 @@ before anything ships:
 eve-rails doctor --all
 ```
 
+`--all` implies `--templates` and `--updates`.
+
 `plan` shows you exactly what would be generated before anything touches disk — the same
 discipline as `terraform plan`. `hotload` knows the difference between a skill patch (safe to
 push live) and a tool change (needs a full redeploy) automatically, because the rule is

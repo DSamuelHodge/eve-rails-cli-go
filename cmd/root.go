@@ -11,7 +11,7 @@ var rootCmd = &cobra.Command{
 	Use:           "eve-rails",
 	Short:         "Rails-inspired convention layer for Eve agent fleets",
 	Long:          "eve-rails is a Rails-inspired convention layer for Eve agent fleets.",
-	Version:       "0.1.0",
+	Version:       "0.1.1",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	CompletionOptions: cobra.CompletionOptions{

@@ -5,7 +5,7 @@
   <h1>Eve Rails CLI</h1>
 
 [![CI/CD](https://github.com/DSamuelHodge/eve-rails-cli-go/actions/workflows/ci.yml/badge.svg)](https://github.com/DSamuelHodge/eve-rails-cli-go/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](go.mod)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8.svg)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node.js-24%2B-339933.svg)](https://nodejs.org/)

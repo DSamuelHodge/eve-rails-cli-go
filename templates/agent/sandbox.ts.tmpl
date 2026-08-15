@@ -1,0 +1,7 @@
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox({
+  async onSession({ use }) {
+    await use({ networkPolicy: {{ .sandbox.NetworkPolicyLiteral }} });
+  },
+});

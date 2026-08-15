@@ -41,6 +41,10 @@ func testCatalog() *config.CatalogManifest {
 	}
 }
 
+func boolPtr(value bool) *bool {
+	return &value
+}
+
 func testManifest() *config.FleetManifest {
 	return &config.FleetManifest{
 		Defaults: config.ManifestDefaults{
@@ -269,4 +273,166 @@ func stringsContains(value, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestRendererSupportsDefaultsPresetsAndSubagentFiles(t *testing.T) {
+	manifest := testManifest()
+	manifest.Defaults.Channels = []string{"telegram"}
+	manifest.Defaults.Tools = config.ComponentMap{"search": "1.0.0"}
+	manifest.Defaults.Skills = config.ComponentMap{"summarize": "1.0.0"}
+	manifest.Agents[0].Tools = config.ComponentMap{}
+	manifest.Agents[0].Skills = config.ComponentMap{}
+	manifest.Agents[0].Channels = nil
+	manifest.Agents[0].Subagents = config.SubagentList{
+		{
+			Name:           "triage",
+			Title:          "Triage Rep",
+			RoleID:         "triage",
+			Responsibility: "Classify and route tickets.",
+			Tools:          []string{"search"},
+			Skills:         []string{"summarize"},
+		},
+	}
+
+	renderer, err := Load(testTemplates(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := renderer.RenderAgent(&manifest.Agents[0], manifest, testCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]bool{}
+	contents := map[string]string{}
+	for _, file := range files {
+		paths[file.Path] = true
+		contents[file.Path] = file.Content
+	}
+
+	// Defaults tools/skills flow through to the agent.
+	if !paths["agents/support/agent/tools/search.ts"] {
+		t.Error("expected defaults tool to render for agent")
+	}
+	if !paths["agents/support/agent/skills/summarize.md"] {
+		t.Error("expected defaults skill to render for agent")
+	}
+
+	// Telegram is an implicit preset: no catalog entry, still rendered.
+	if !paths["agents/support/agent/channels/telegram.ts"] {
+		t.Error("expected preset telegram channel to render without catalog entry")
+	}
+	if !stringsContains(contents["agents/support/agent/channels/telegram.ts"], "telegramChannel") {
+		t.Error("expected telegram channel to use telegramChannel factory")
+	}
+
+	// Subagent tools/skills render as real Eve slots.
+	for _, path := range []string{
+		"agents/support/agent/subagents/triage/agent.ts",
+		"agents/support/agent/subagents/triage/instructions.md",
+		"agents/support/agent/subagents/triage/tools/search.ts",
+		"agents/support/agent/subagents/triage/skills/summarize.md",
+	} {
+		if !paths[path] {
+			t.Errorf("expected subagent file %s", path)
+		}
+	}
+	if stringsContains(contents["agents/support/agent/subagents/triage/instructions.md"], "Declared channels") {
+		t.Error("expected subagent instructions to omit channels (root-only in Eve)")
+	}
+}
+
+func TestRendererRendersApprovalGate(t *testing.T) {
+	manifest := testManifest()
+	manifest.Agents[0].Tools = config.ComponentMap{"search": "1.0.0"}
+	renderer, err := Load(testTemplates(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := renderer.RenderAgent(&manifest.Agents[0], manifest, testCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := map[string]string{}
+	for _, file := range files {
+		contents[file.Path] = file.Content
+	}
+	toolTS := contents["agents/support/agent/tools/search.ts"]
+	if !stringsContains(toolTS, `approval: never()`) {
+		t.Errorf("expected read tool to render approval: never(), got:\n%s", toolTS)
+	}
+	if !stringsContains(toolTS, `import { never } from "eve/tools/approval";`) {
+		t.Errorf("expected approval helper import, got:\n%s", toolTS)
+	}
+}
+
+func TestRendererRendersApprovalGateAlwaysForBlockingPolicy(t *testing.T) {
+	write := config.SideEffectsWrite
+	catalog := testCatalog()
+	catalog.Tools["send_email"] = config.CatalogComponent{Version: "1.0.0", SideEffects: &write}
+	catalog.Approvals = map[string]config.CatalogComponent{
+		"required": {Version: "1.0.0", Blocking: boolPtr(true)},
+	}
+	manifest := testManifest()
+	manifest.Agents[0].Tools = config.ComponentMap{"send_email": "1.0.0"}
+	manifest.Agents[0].Approvals = map[string]string{"send_email": "required"}
+	renderer, err := Load(testTemplates(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := renderer.RenderAgent(&manifest.Agents[0], manifest, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := map[string]string{}
+	for _, file := range files {
+		contents[file.Path] = file.Content
+	}
+	toolTS := contents["agents/support/agent/tools/send_email.ts"]
+	if !stringsContains(toolTS, `approval: always()`) {
+		t.Errorf("expected blocking policy to render approval: always(), got:\n%s", toolTS)
+	}
+	if !stringsContains(toolTS, `import { always } from "eve/tools/approval";`) {
+		t.Errorf("expected always import, got:\n%s", toolTS)
+	}
+}
+
+func TestRendererRendersSandbox(t *testing.T) {
+	manifest := testManifest()
+	readOnly := "read-only"
+	manifest.Agents[0].RuntimePolicy = &config.RuntimePolicy{Sandbox: readOnly}
+	renderer, err := Load(testTemplates(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := renderer.RenderAgent(&manifest.Agents[0], manifest, testCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := map[string]string{}
+	for _, file := range files {
+		contents[file.Path] = file.Content
+	}
+	sandboxTS, ok := contents["agents/support/agent/sandbox.ts"]
+	if !ok {
+		t.Fatal("expected sandbox.ts to be rendered")
+	}
+	if !stringsContains(sandboxTS, `networkPolicy: "deny-all"`) {
+		t.Errorf("expected deny-all network policy for read-only sandbox, got:\n%s", sandboxTS)
+	}
+}
+
+func TestSandboxNetworkPolicy(t *testing.T) {
+	cases := map[string]string{
+		"read-only":              "deny-all",
+		"workspace-write":        "deny-all",
+		"network-read":           "allow-all",
+		"external-write-gated":   "allow-all",
+		"production-write-gated": "allow-all",
+		"approval-gated":         "allow-all",
+	}
+	for sandbox, expected := range cases {
+		if got := SandboxNetworkPolicy(sandbox); got != expected {
+			t.Errorf("SandboxNetworkPolicy(%s): expected %s, got %s", sandbox, expected, got)
+		}
+	}
 }

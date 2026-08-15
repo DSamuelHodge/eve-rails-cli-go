@@ -137,6 +137,12 @@ func renderPlatformChannel(name string, component *config.CatalogComponent, auth
 	}
 }
 
+// PresetChannel returns a synthesized channel component for a known platform
+// slug, so channels like slack and telegram work with no catalog.yml entry.
+func PresetChannel(name string) *config.CatalogComponent {
+	return config.PresetChannel(name)
+}
+
 func renderTwilioChannel(component *config.CatalogComponent) string {
 	allowFrom := component.AllowFrom
 	if allowFrom == "" {
@@ -299,6 +305,24 @@ func ToolDescription(tool string, component *config.CatalogComponent) string {
 	return fmt.Sprintf("Generated %s tool contract.", tool)
 }
 
+// HarnessDefaultTools are the built-in tools Vercel Eve provisions for every
+// agent with no authored file. They are implicit: eve-rails never generates
+// files for them, and never disables them.
+var HarnessDefaultTools = []string{
+	"bash",
+	"read_file",
+	"write_file",
+	"glob",
+	"grep",
+	"web_fetch",
+	"web_search",
+	"todo",
+	"ask_question",
+	"agent",
+	"load_skill",
+	"connection_search",
+}
+
 // SubagentRole resolves the role topology for a subagent.
 func SubagentRole(agent *config.AgentManifest, subagent *config.SubagentManifest) *config.RoleTopology {
 	if subagent.Title != "" || subagent.RoleID != "" || subagent.Responsibility != "" || subagent.RuntimePolicy != nil {
@@ -362,15 +386,14 @@ func renderSubagentPlaceholder(agent string, subagent *config.SubagentManifest, 
 		forbiddenActions = policy.ForbiddenActions
 	}
 
-	body := fmt.Sprintf("# %s\n\n## Role\n\n- Slug: `%s`\n- Role id: `%s`\n- Parent agent: `%s`\n\n## Responsibility\n\n%s\n\n## Runtime Boundary\n\n- Sandbox: `%s`\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n\n## Operating Rules\n\n- Accept delegated work only when it fits this role boundary.\n- Return concise findings, artifacts, decisions, and open risks to the parent agent.\n- Ask the parent agent to escalate when the task requires approval, credentials, production impact, legal judgment, security judgment, or customer-facing commitments.\n- Keep local assumptions explicit so the parent agent can review or re-delegate.\n",
+	body := fmt.Sprintf("# %s\n\n## Role\n\n- Slug: `%s`\n- Role id: `%s`\n- Parent agent: `%s`\n\n## Responsibility\n\n%s\n\n## Runtime Boundary\n\n- Sandbox: `%s`\n%s\n%s\n%s\n%s\n%s\n%s\n\n## Operating Rules\n\n- Accept delegated work only when it fits this role boundary.\n- Return concise findings, artifacts, decisions, and open risks to the parent agent.\n- Ask the parent agent to escalate when the task requires approval, credentials, production impact, legal judgment, security judgment, or customer-facing commitments.\n- Keep local assumptions explicit so the parent agent can review or re-delegate.\n- This subagent has no channels of its own; the parent owns all message entry points.\n",
 		title, subagent.Name, roleID, agent, responsibility, sandbox,
 		markdownList("Allowed tools", allowedTools),
 		markdownList("Approval gates", approvals),
 		markdownList("Forbidden actions", forbiddenActions),
 		markdownList("Declared tools", subagent.Tools),
 		markdownList("Declared skills", subagent.Skills),
-		markdownList("Declared memory", subagent.Memory),
-		markdownList("Declared channels", subagent.Channels))
+		markdownList("Declared memory", subagent.Memory))
 
 	return WithGeneratedHeader(CommentStyleHash, agent, "subagent-placeholder", body)
 }
@@ -401,6 +424,30 @@ func escapeJSON(value string) string {
 // EscapeTSString escapes a value for embedding in a TS string literal.
 func EscapeTSString(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
+}
+
+// EffectiveSandbox returns the agent's effective sandbox boundary, or "" when
+// no boundary is configured (Eve's default sandbox applies).
+func EffectiveSandbox(agent *config.AgentManifest) string {
+	if agent.RuntimePolicy != nil {
+		return agent.RuntimePolicy.Sandbox
+	}
+	return ""
+}
+
+// SandboxNetworkPolicy maps an eve-rails sandbox boundary to Eve's network
+// policy. Boundaries that only read, or that confine writes to the workspace,
+// get deny-all egress; any boundary that reaches external systems gets
+// allow-all and relies on approval gating instead of network lockdown.
+func SandboxNetworkPolicy(sandbox string) string {
+	switch sandbox {
+	case "read-only", "workspace-write":
+		return "deny-all"
+	case "network-read", "external-write-gated", "production-write-gated", "approval-gated":
+		return "allow-all"
+	default:
+		return "deny-all"
+	}
 }
 
 func markdownList(label string, values []string) string {
@@ -528,21 +575,21 @@ func renderVersionsLock(agent *config.AgentManifest, manifest *config.FleetManif
 	entries := []lockEntry{
 		{key: "runtime/eve@0.24.4", source: "package.json", digest: "runtime:eve:0.24.4"},
 	}
-	for _, component := range versioning.EffectiveComponents(manifest.Shared.Tools, agent.Tools) {
+	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Tools, manifest.Shared.Tools, agent.Tools) {
 		entries = append(entries, lockEntry{
 			key:    lockKey("tools", component.Name, LockVersion(catalog.Tools, component.Name, component.Version)),
 			source: "manifests/catalog.yml",
 			digest: digestFor(filepath.Join(outputRoot, "tools", component.Name+".ts")),
 		})
 	}
-	for _, component := range versioning.EffectiveComponents(manifest.Shared.Skills, agent.Skills) {
+	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Skills, manifest.Shared.Skills, agent.Skills) {
 		entries = append(entries, lockEntry{
 			key:    lockKey("skills", component.Name, LockVersion(catalog.Skills, component.Name, component.Version)),
 			source: "manifests/catalog.yml",
 			digest: digestFor(filepath.Join(outputRoot, "skills", component.Name+".md")),
 		})
 	}
-	for _, component := range versioning.EffectiveComponents(manifest.Shared.Memory, agent.Memory) {
+	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Memory, manifest.Shared.Memory, agent.Memory) {
 		entries = append(entries, lockEntry{
 			key:    lockKey("memory", component.Name, LockVersion(catalog.Memory, component.Name, component.Version)),
 			source: "manifests/catalog.yml",
@@ -551,14 +598,30 @@ func renderVersionsLock(agent *config.AgentManifest, manifest *config.FleetManif
 	}
 	for _, channel := range config.EffectiveStringList(manifest.Defaults.Channels, agent.Channels) {
 		component, ok := catalog.Channels[channel]
+		version := CatalogVersion(catalog.Channels, channel)
 		path := filepath.Join(outputRoot, "channels", channel+".ts")
-		if !ok || component.Kind == "" || component.Kind == "eve" {
+		if !ok {
+			preset := PresetChannel(channel)
+			if preset == nil {
+				continue
+			}
+			component = *preset
+			version = preset.Version
+		}
+		if component.Kind == "" || component.Kind == "eve" {
 			path = filepath.Join(outputRoot, "channels", "eve.ts")
 		}
 		entries = append(entries, lockEntry{
-			key:    lockKey("channels", channel, CatalogVersion(catalog.Channels, channel)),
+			key:    lockKey("channels", channel, version),
 			source: "manifests/catalog.yml",
 			digest: digestFor(path),
+		})
+	}
+	if sandboxName := EffectiveSandbox(agent); sandboxName != "" {
+		entries = append(entries, lockEntry{
+			key:    fmt.Sprintf("manifest/agents/%s/sandbox@%s", agent.Name, sandboxName),
+			source: "manifests/agents.yml",
+			digest: digestFor(filepath.Join(outputRoot, "sandbox.ts")),
 		})
 	}
 	for _, schedule := range config.EffectiveSchedules(agent, manifest) {
@@ -579,14 +642,26 @@ func renderVersionsLock(agent *config.AgentManifest, manifest *config.FleetManif
 		})
 	}
 	for i := range agent.Subagents {
-		name := agent.Subagents[i].Name
+		subagent := &agent.Subagents[i]
+		name := subagent.Name
+		subagentRoot := filepath.Join(outputRoot, "subagents", name)
+		subagentPaths := []string{
+			filepath.Join(subagentRoot, "instructions.md"),
+			filepath.Join(subagentRoot, "agent.ts"),
+		}
+		for _, tool := range subagent.Tools {
+			subagentPaths = append(subagentPaths, filepath.Join(subagentRoot, "tools", tool+".ts"))
+		}
+		for _, skill := range subagent.Skills {
+			subagentPaths = append(subagentPaths, filepath.Join(subagentRoot, "skills", skill+".md"))
+		}
+		for _, memory := range subagent.Memory {
+			subagentPaths = append(subagentPaths, filepath.Join(subagentRoot, "memory", memory+".ts"))
+		}
 		entries = append(entries, lockEntry{
 			key:    fmt.Sprintf("manifest/subagents/%s@manifest", name),
 			source: "manifests/agents.yml",
-			digest: digestFor(
-				filepath.Join(outputRoot, "subagents", name, "instructions.md"),
-				filepath.Join(outputRoot, "subagents", name, "agent.ts"),
-			),
+			digest: digestFor(subagentPaths...),
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].key < entries[j].key })

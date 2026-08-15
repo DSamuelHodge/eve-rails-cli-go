@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/DSamuelHodge/eve-rails-cli-go/internal/config"
@@ -338,7 +339,53 @@ func addTemplateChecks(checks *[]Check, manifest *config.FleetManifest, catalog 
 	pushCheck(checks, "generated-metadata", GeneratedMetadataPresent(plan),
 		"generated files include metadata headers",
 		"one or more generated files are missing metadata headers")
+	addRenderedApprovalGateChecks(checks, manifest, catalog, plan)
 	return nil
+}
+
+// addRenderedApprovalGateChecks asserts the approval gate rendered into each
+// generated tool file matches the manifest's approval-policy assignment, so a
+// manifest that passes approval-coverage cannot silently ship an ungated tool.
+func addRenderedApprovalGateChecks(checks *[]Check, manifest *config.FleetManifest, catalog *config.CatalogManifest, plan *render.BatchPlan) {
+	contentByPath := make(map[string]string, len(plan.Operations))
+	for _, operation := range plan.Operations {
+		contentByPath[operation.Path] = operation.Content
+	}
+	var mismatches []string
+	for i := range manifest.Agents {
+		agent := &manifest.Agents[i]
+		for tool := range agent.Tools {
+			expected := config.ApprovalGateFor(tool, agent.Approvals, catalog)
+			path := filepath.Join("agents", agent.Name, "agent", "tools", tool+".ts")
+			if !gateMatches(contentByPath[path], expected) {
+				mismatches = append(mismatches, fmt.Sprintf("%s expects %s", path, expected))
+			}
+		}
+		for j := range agent.Subagents {
+			subagent := &agent.Subagents[j]
+			for _, tool := range subagent.Tools {
+				expected := config.ApprovalGateFor(tool, subagent.Approvals, catalog)
+				path := filepath.Join("agents", agent.Name, "agent", "subagents", subagent.Name, "tools", tool+".ts")
+				if !gateMatches(contentByPath[path], expected) {
+					mismatches = append(mismatches, fmt.Sprintf("%s expects %s", path, expected))
+				}
+			}
+		}
+	}
+	pushCheck(checks, "rendered-approval-gates", len(mismatches) == 0,
+		"rendered tool approval gates match manifest approval-policy assignment",
+		fmt.Sprintf("approval gate mismatch(es): %s", strings.Join(mismatches, "; ")))
+}
+
+// gateMatches reports whether rendered content carries the expected Eve
+// approval helper call.
+func gateMatches(content, expected string) bool {
+	if expected == "" {
+		return true
+	}
+	helper := strings.TrimSuffix(expected, "()")
+	return strings.Contains(content, "approval: "+expected) ||
+		strings.Contains(content, "approval: "+helper)
 }
 
 func addUpdateChecks(checks *[]Check, manifest *config.FleetManifest, catalog *config.CatalogManifest, templateDir string) error {

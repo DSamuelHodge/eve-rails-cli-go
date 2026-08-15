@@ -221,6 +221,37 @@ func EffectiveComponents(shared []string, agentComponents config.ComponentMap) [
 	return components
 }
 
+// EffectiveComponentsFromDefaults merges default, shared, and agent component
+// maps, with later sources overriding earlier ones. Defaults and shared keep
+// fleet order; agent overrides win on version conflicts.
+func EffectiveComponentsFromDefaults(defaults config.ComponentMap, shared []string, agentComponents config.ComponentMap) []struct{ Name, Version string } {
+	merged := make(config.ComponentMap)
+	var order []string
+	for name, version := range defaults {
+		if _, seen := merged[name]; !seen {
+			order = append(order, name)
+		}
+		merged[name] = version
+	}
+	for _, name := range shared {
+		if _, seen := merged[name]; !seen {
+			order = append(order, name)
+			merged[name] = "catalog"
+		}
+	}
+	for name, version := range agentComponents {
+		if _, seen := merged[name]; !seen {
+			order = append(order, name)
+		}
+		merged[name] = version
+	}
+	var components []struct{ Name, Version string }
+	for _, name := range order {
+		components = append(components, struct{ Name, Version string }{Name: name, Version: merged[name]})
+	}
+	return components
+}
+
 // PrintVersionReports writes a human-readable update report.
 func PrintVersionReports(reports []VersionReport) {
 	if len(reports) == 0 {

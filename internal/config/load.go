@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -69,7 +70,7 @@ func DefaultManifestYAML() string {
 
 // DefaultCatalogYAML is the starter catalog written by init.
 func DefaultCatalogYAML() string {
-	return "tools:\nskills:\nevals:\napprovals:\n  required:\n    version: 1.0.0\n  on-risk:\n    version: 1.0.0\nmemory:\nchannels:\nschedules:\n"
+	return "tools:\nskills:\nevals:\napprovals:\n  required:\n    version: 1.0.0\n    blocking: true\n  on-risk:\n    version: 1.0.0\n    blocking: true\nmemory:\nchannels:\nschedules:\n"
 }
 
 // SelectedAgents filters agents by name, erroring when the filter matches none.
@@ -157,6 +158,46 @@ func IsRiskyTool(tool string, catalog *CatalogManifest) bool {
 		return false
 	}
 	return IsRiskySideEffect(component.SideEffects)
+}
+
+// ApprovalGateFor resolves the rendered approval gate for a tool under a given
+// approval-policy assignment. It returns the Eve approval helper call to emit,
+// e.g. "always()" or "never()". Resolution order:
+//
+//  1. A per-agent approval policy assigned to the tool (agent.Approvals) — its
+//     catalog component's `blocking` field decides. An assigned policy with no
+//     `blocking` field defaults to always() (blocking) so a policy that never
+//     states its semantics cannot silently auto-approve.
+//  2. A catalog tool's own required_approvals list — blocking unless every
+//     referenced policy is explicitly non-blocking.
+//  3. Fallback on side effects: risky side effects block, read/none never do.
+func ApprovalGateFor(tool string, approvals map[string]string, catalog *CatalogManifest) string {
+	if policyName, ok := approvals[tool]; ok && strings.TrimSpace(policyName) != "" {
+		if policy, ok := catalog.Approvals[policyName]; ok {
+			if policy.Blocking != nil {
+				if *policy.Blocking {
+					return "always()"
+				}
+				return "never()"
+			}
+		}
+		return "always()"
+	}
+	if component, ok := catalog.Tools[tool]; ok {
+		if len(component.RequiredApprovals) > 0 {
+			for _, policyName := range component.RequiredApprovals {
+				if policy, ok := catalog.Approvals[policyName]; ok && policy.Blocking != nil && !*policy.Blocking {
+					continue
+				}
+				return "always()"
+			}
+			return "never()"
+		}
+		if IsRiskySideEffect(component.SideEffects) {
+			return "always()"
+		}
+	}
+	return "never()"
 }
 
 func contains(values []string, target string) bool {

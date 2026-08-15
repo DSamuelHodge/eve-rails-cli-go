@@ -80,4 +80,86 @@ trap 'rm -rf "$TMP"' EXIT
   "$BIN" graph --all --format json >/dev/null
 )
 
+echo "== defaults, presets, and subagent files =="
+TMP2="$(mktemp -d)"
+trap 'rm -rf "$TMP" "$TMP2"' EXIT
+
+mkdir -p "$TMP2/manifests"
+cat > "$TMP2/manifests/catalog.yml" <<'CATALOG'
+tools:
+  search_customers:
+    version: 1.0.0
+    side_effects: read
+  prepare_refund:
+    version: 1.0.0
+    side_effects: money
+skills:
+  summarize:
+    version: 1.0.0
+evals:
+approvals:
+  required:
+    version: 1.0.0
+    blocking: true
+memory:
+  customer_profile:
+    version: 1.0.0
+    retention: 180d
+channels:
+schedules:
+CATALOG
+cat > "$TMP2/manifests/agents.yml" <<'AGENTS'
+defaults:
+  model: openai/gpt-5.5
+  owner: cli-test
+  channels: [slack, telegram]
+  schedules: []
+  evals: []
+  tools:
+    search_customers: 1.0.0
+  skills:
+    summarize: 1.0.0
+
+agents:
+  - name: support
+    version: 1.0.0
+    responsibility: Triage and resolve support requests.
+    tools:
+      prepare_refund: 1.0.0
+    approvals:
+      prepare_refund: required
+    x_runtime_policy:
+      sandbox: approval-gated
+    subagents:
+      - name: triage
+        title: Triage Rep
+        role_id: triage
+        responsibility: Classify and route tickets.
+        tools: [search_customers]
+        skills: [summarize]
+        memory: [customer_profile]
+AGENTS
+(
+  cd "$TMP2"
+  "$BIN" doctor --all --manifest manifests/agents.yml --catalog manifests/catalog.yml >/dev/null
+  "$BIN" apply manifests/agents.yml --catalog manifests/catalog.yml --template-dir "$ROOT/templates/agent" >/dev/null
+  "$BIN" doctor --all --templates --manifest manifests/agents.yml --catalog manifests/catalog.yml --template-dir "$ROOT/templates/agent" >/dev/null
+  test -f agents/support/agent/channels/slack.ts
+  test -f agents/support/agent/channels/telegram.ts
+  test -f agents/support/agent/tools/search_customers.ts
+  test -f agents/support/agent/skills/summarize.md
+  test -f agents/support/agent/subagents/triage/tools/search_customers.ts
+  test -f agents/support/agent/subagents/triage/skills/summarize.md
+  test -f agents/support/agent/subagents/triage/memory/customer_profile.ts
+  grep -q "connectSlackCredentials" agents/support/agent/channels/slack.ts
+  grep -q "telegramChannel" agents/support/agent/channels/telegram.ts
+  grep -q "Declared channels" agents/support/agent/subagents/triage/instructions.md && exit 1 || true
+  grep -q "approval: always()" agents/support/agent/tools/prepare_refund.ts
+  grep -q 'from "eve/tools/approval"' agents/support/agent/tools/prepare_refund.ts
+  grep -q "approval: never()" agents/support/agent/tools/search_customers.ts
+  test -f agents/support/agent/sandbox.ts
+  grep -q 'networkPolicy: "allow-all"' agents/support/agent/sandbox.ts
+  "$BIN" render --all --check --template-dir "$ROOT/templates/agent" >/dev/null
+)
+
 echo "CLI acceptance sweep passed."

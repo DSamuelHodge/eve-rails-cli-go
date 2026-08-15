@@ -47,6 +47,147 @@ agents:
 	}
 }
 
+func TestManifestParsesDefaultsToolsSkillsMemory(t *testing.T) {
+	source := `
+defaults:
+  model: openai/gpt-5.5
+  owner: agent-platform
+  channels: [slack, telegram]
+  tools:
+    search_customers: 1.0.0
+  skills:
+    summarize: 2.1.0
+  memory:
+    customer_profile: 1.0.0
+agents:
+  - name: support
+    version: 1.0.0
+    responsibility: handles support
+`
+	manifest := parseManifest(t, source)
+	defaults := manifest.Defaults
+	if len(defaults.Channels) != 2 || defaults.Channels[0] != "slack" || defaults.Channels[1] != "telegram" {
+		t.Fatalf("unexpected default channels: %v", defaults.Channels)
+	}
+	if defaults.Tools["search_customers"] != "1.0.0" {
+		t.Fatalf("unexpected default tools: %v", defaults.Tools)
+	}
+	if defaults.Skills["summarize"] != "2.1.0" {
+		t.Fatalf("unexpected default skills: %v", defaults.Skills)
+	}
+	if defaults.Memory["customer_profile"] != "1.0.0" {
+		t.Fatalf("unexpected default memory: %v", defaults.Memory)
+	}
+}
+
+func TestPresetChannelKnownSlugs(t *testing.T) {
+	for _, slug := range []string{"slack", "telegram", "discord", "teams", "twilio", "linear", "github", "eve"} {
+		if PresetChannel(slug) == nil {
+			t.Errorf("expected preset channel for %s", slug)
+		}
+	}
+	if PresetChannel("custom_channel") != nil {
+		t.Error("expected no preset for unknown channel")
+	}
+	if !IsPresetChannel("slack") {
+		t.Error("expected slack to be recognized as a preset")
+	}
+	if IsPresetChannel("custom_channel") {
+		t.Error("expected custom_channel not to be recognized as a preset")
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func TestManifestParsesApprovalBlocking(t *testing.T) {
+	source := `
+approvals:
+  required:
+    version: 1.0.0
+    blocking: true
+  logged:
+    version: 1.0.0
+    blocking: false
+  legacy:
+    version: 1.0.0
+`
+	var catalog CatalogManifest
+	if err := yaml.Unmarshal([]byte(source), &catalog); err != nil {
+		t.Fatalf("failed to parse catalog: %v", err)
+	}
+	if catalog.Approvals["required"].Blocking == nil || !*catalog.Approvals["required"].Blocking {
+		t.Error("expected required policy to parse as blocking=true")
+	}
+	if catalog.Approvals["logged"].Blocking == nil || *catalog.Approvals["logged"].Blocking {
+		t.Error("expected logged policy to parse as blocking=false")
+	}
+	if catalog.Approvals["legacy"].Blocking != nil {
+		t.Error("expected legacy policy to leave blocking unset")
+	}
+}
+
+func TestApprovalGateFor(t *testing.T) {
+	write := SideEffectsWrite
+	read := SideEffectsRead
+	catalog := &CatalogManifest{
+		Tools: map[string]CatalogComponent{
+			"send_email":  {SideEffects: &write},
+			"list_emails": {SideEffects: &read},
+		},
+		Approvals: map[string]CatalogComponent{
+			"required":  {Blocking: boolPtr(true)},
+			"audit_log": {Blocking: boolPtr(false)},
+			"legacy":    {},
+		},
+	}
+
+	if got := ApprovalGateFor("send_email", map[string]string{"send_email": "required"}, catalog); got != "always()" {
+		t.Errorf("blocking policy: expected always(), got %s", got)
+	}
+	if got := ApprovalGateFor("send_email", map[string]string{"send_email": "audit_log"}, catalog); got != "never()" {
+		t.Errorf("non-blocking policy: expected never(), got %s", got)
+	}
+	if got := ApprovalGateFor("send_email", map[string]string{"send_email": "legacy"}, catalog); got != "always()" {
+		t.Errorf("unset blocking: expected always() default, got %s", got)
+	}
+	if got := ApprovalGateFor("send_email", nil, catalog); got != "always()" {
+		t.Errorf("risky with no policy: expected always(), got %s", got)
+	}
+	if got := ApprovalGateFor("list_emails", nil, catalog); got != "never()" {
+		t.Errorf("read with no policy: expected never(), got %s", got)
+	}
+}
+
+func TestApprovalGateForRequiredApprovals(t *testing.T) {
+	write := SideEffectsWrite
+	read := SideEffectsRead
+	catalog := &CatalogManifest{
+		Tools: map[string]CatalogComponent{
+			"write_fs": {
+				SideEffects:       &write,
+				RequiredApprovals: []string{"audit_log"},
+			},
+			"query_metrics": {
+				SideEffects:       &read,
+				RequiredApprovals: []string{"required"},
+			},
+		},
+		Approvals: map[string]CatalogComponent{
+			"required":  {Blocking: boolPtr(true)},
+			"audit_log": {Blocking: boolPtr(false)},
+		},
+	}
+
+	if got := ApprovalGateFor("write_fs", nil, catalog); got != "never()" {
+		t.Errorf("risky tool with non-blocking required approval: expected never(), got %s", got)
+	}
+	if got := ApprovalGateFor("query_metrics", nil, catalog); got != "always()" {
+		t.Errorf("read tool with blocking required approval: expected always(), got %s", got)
+	}
+}
+
 func TestObservabilityAcceptsBool(t *testing.T) {
 	var manifest EnvironmentsManifest
 	if err := yaml.Unmarshal([]byte(`

@@ -107,6 +107,34 @@ func TestEffectiveEvalsMergesDefaults(t *testing.T) {
 	}
 }
 
+func TestEffectiveComponentsFromDefaultsPrecedence(t *testing.T) {
+	defaults := config.ComponentMap{"search": "1.0.0", "shared_tool": "1.0.0"}
+	shared := []string{"shared_tool", "fleet_tool"}
+	agent := config.ComponentMap{"shared_tool": "2.0.0", "agent_tool": "3.0.0"}
+	components := EffectiveComponentsFromDefaults(defaults, shared, agent)
+
+	byName := map[string]string{}
+	for _, component := range components {
+		byName[component.Name] = component.Version
+	}
+
+	if byName["search"] != "1.0.0" {
+		t.Errorf("expected defaults version for search, got %q", byName["search"])
+	}
+	if byName["fleet_tool"] != "catalog" {
+		t.Errorf("expected catalog version for shared-only tool, got %q", byName["fleet_tool"])
+	}
+	if byName["shared_tool"] != "2.0.0" {
+		t.Errorf("expected agent override to win for shared_tool, got %q", byName["shared_tool"])
+	}
+	if byName["agent_tool"] != "3.0.0" {
+		t.Errorf("expected agent-only tool, got %q", byName["agent_tool"])
+	}
+	if len(components) != 4 {
+		t.Errorf("expected 4 merged components, got %d: %+v", len(components), components)
+	}
+}
+
 func TestApplyVersionPolicy(t *testing.T) {
 	manifest := validManifest()
 	pin := config.PolicyPin

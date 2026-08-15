@@ -9,6 +9,35 @@ import (
 // ComponentMap maps a component name to a requested version.
 type ComponentMap map[string]string
 
+// PresetChannel returns a synthesized channel component for a known platform
+// slug, so channels like slack and telegram work with no catalog.yml entry.
+func PresetChannel(name string) *CatalogComponent {
+	switch name {
+	case "slack":
+		return &CatalogComponent{Kind: "slack", Version: "1.0.0", ConnectUID: "slack/my-agent", Description: "Slack mentions and DMs via Vercel Connect."}
+	case "telegram":
+		return &CatalogComponent{Kind: "telegram", Version: "1.0.0", BotUsername: "my_bot", Description: "Telegram bot webhooks."}
+	case "discord":
+		return &CatalogComponent{Kind: "discord", Version: "1.0.0", Description: "Discord slash commands and components."}
+	case "teams":
+		return &CatalogComponent{Kind: "teams", Version: "1.0.0", Description: "Microsoft Teams messages and adaptive cards."}
+	case "twilio":
+		return &CatalogComponent{Kind: "twilio", Version: "1.0.0", AllowFrom: "env:TWILIO_ALLOWED_FROM", MessagingFrom: "env:TWILIO_FROM_NUMBER", Description: "SMS via Twilio."}
+	case "linear":
+		return &CatalogComponent{Kind: "linear", Version: "1.0.0", Description: "Linear issue delegation."}
+	case "github":
+		return &CatalogComponent{Kind: "github", Version: "1.0.0", Description: "GitHub mentions and PR review."}
+	case "eve":
+		return &CatalogComponent{Kind: "eve", Version: "1.0.0", Description: "Default HTTP session channel."}
+	}
+	return nil
+}
+
+// IsPresetChannel reports whether name is a known platform channel preset.
+func IsPresetChannel(name string) bool {
+	return PresetChannel(name) != nil
+}
+
 // FleetManifest is the root fleet intent document.
 type FleetManifest struct {
 	Defaults      ManifestDefaults `yaml:"defaults"`
@@ -19,17 +48,20 @@ type FleetManifest struct {
 
 // ManifestDefaults holds fleet-wide defaults inherited by agents.
 type ManifestDefaults struct {
-	Model       string   `yaml:"model"`
-	Owner       string   `yaml:"owner"`
-	Auth        string   `yaml:"auth"`
-	Visibility  string   `yaml:"visibility"`
-	CostBudget  *float64 `yaml:"cost_budget"`
-	TokenBudget *uint64  `yaml:"token_budget"`
-	Timeout     string   `yaml:"timeout"`
-	Channels    []string `yaml:"channels"`
-	Schedules   []string `yaml:"schedules"`
-	Evals       []string `yaml:"evals"`
-	Approvals   string   `yaml:"approvals"`
+	Model       string       `yaml:"model"`
+	Owner       string       `yaml:"owner"`
+	Auth        string       `yaml:"auth"`
+	Visibility  string       `yaml:"visibility"`
+	CostBudget  *float64     `yaml:"cost_budget"`
+	TokenBudget *uint64      `yaml:"token_budget"`
+	Timeout     string       `yaml:"timeout"`
+	Channels    []string     `yaml:"channels"`
+	Schedules   []string     `yaml:"schedules"`
+	Evals       []string     `yaml:"evals"`
+	Approvals   string       `yaml:"approvals"`
+	Tools       ComponentMap `yaml:"tools"`
+	Skills      ComponentMap `yaml:"skills"`
+	Memory      ComponentMap `yaml:"memory"`
 }
 
 // VersionPolicy controls update classification for component kinds.
@@ -165,6 +197,7 @@ type CatalogComponent struct {
 	Description          string       `yaml:"description"`
 	Kind                 string       `yaml:"kind"`
 	SideEffects          *SideEffects `yaml:"side_effects"`
+	Blocking             *bool        `yaml:"blocking"`
 	RequiredApprovals    []string     `yaml:"required_approvals"`
 	RequiredEnv          []string     `yaml:"required_env"`
 	RequiredConnectors   []string     `yaml:"required_connectors"`

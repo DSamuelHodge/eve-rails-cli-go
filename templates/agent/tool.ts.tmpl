@@ -1,8 +1,10 @@
 import { defineTool } from "eve/tools";
+import { {{ .tool.ApprovalHelper }} } from "eve/tools/approval";
 import { z } from "zod";
 
 export default defineTool({
   description: {{ .tool.DescriptionLiteral }},
+  approval: {{ .tool.ApprovalLiteral }},
   inputSchema: z.object({}),
   async execute() {
     return {

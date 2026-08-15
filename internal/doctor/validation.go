@@ -35,6 +35,15 @@ func ValidateManifest(manifest *config.FleetManifest, catalog *config.CatalogMan
 	validateNamedList(report, "shared", "skill", manifest.Shared.Skills, catalog.Skills)
 	validateNamedList(report, "shared", "memory", manifest.Shared.Memory, catalog.Memory)
 	validateNamedList(report, "shared", "schedule", manifest.Shared.Schedules, catalog.Schedules)
+	for tool, requested := range manifest.Defaults.Tools {
+		validateComponentVersion(report, "defaults", "tool", tool, requested, catalog.Tools)
+	}
+	for skill, requested := range manifest.Defaults.Skills {
+		validateComponentVersion(report, "defaults", "skill", skill, requested, catalog.Skills)
+	}
+	for memory, requested := range manifest.Defaults.Memory {
+		validateComponentVersion(report, "defaults", "memory", memory, requested, catalog.Memory)
+	}
 	if manifest.Defaults.Approvals != "" {
 		validatePolicy(report, "defaults", manifest.Defaults.Approvals, catalog)
 	}
@@ -76,8 +85,8 @@ func ValidateManifest(manifest *config.FleetManifest, catalog *config.CatalogMan
 		if agent.RuntimePolicy != nil {
 			validateRuntimePolicy(report, fmt.Sprintf("agent '%s'", agent.Name), agent.RuntimePolicy, agent.Tools, agent.Approvals, catalog)
 		}
-		validateNamedList(report, fmt.Sprintf("agent '%s'", agent.Name), "channel", manifest.Defaults.Channels, catalog.Channels)
-		validateNamedList(report, fmt.Sprintf("agent '%s'", agent.Name), "channel", agent.Channels, catalog.Channels)
+		validateChannelList(report, fmt.Sprintf("agent '%s'", agent.Name), manifest.Defaults.Channels, catalog.Channels)
+		validateChannelList(report, fmt.Sprintf("agent '%s'", agent.Name), agent.Channels, catalog.Channels)
 		validateNamedList(report, fmt.Sprintf("agent '%s'", agent.Name), "schedule", manifest.Defaults.Schedules, catalog.Schedules)
 		validateNamedList(report, fmt.Sprintf("agent '%s'", agent.Name), "schedule", agent.Schedules, catalog.Schedules)
 		validateNamedList(report, fmt.Sprintf("agent '%s'", agent.Name), "eval", manifest.Defaults.Evals, catalog.Evals)
@@ -105,6 +114,7 @@ func ValidateManifest(manifest *config.FleetManifest, catalog *config.CatalogMan
 					if !covered {
 						report.Errors = append(report.Errors, fmt.Sprintf("agent '%s' tool '%s' requires approval policy '%s'", agent.Name, tool, approval))
 					}
+					warnMissingBlocking(report, fmt.Sprintf("agent '%s'", agent.Name), tool, approval, catalog)
 				}
 			}
 		}
@@ -131,6 +141,7 @@ func ValidateManifest(manifest *config.FleetManifest, catalog *config.CatalogMan
 				report.Errors = append(report.Errors, fmt.Sprintf("agent '%s' approval policy for '%s' cannot be empty", agent.Name, tool))
 			}
 			validatePolicy(report, fmt.Sprintf("agent '%s'", agent.Name), policy, catalog)
+			warnMissingBlocking(report, fmt.Sprintf("agent '%s'", agent.Name), tool, policy, catalog)
 		}
 
 		for j := range agent.Subagents {
@@ -145,9 +156,14 @@ func ValidateManifest(manifest *config.FleetManifest, catalog *config.CatalogMan
 			validateNamedList(report, scope, "tool", subagent.Tools, catalog.Tools)
 			validateNamedList(report, scope, "skill", subagent.Skills, catalog.Skills)
 			validateNamedList(report, scope, "memory", subagent.Memory, catalog.Memory)
-			validateNamedList(report, scope, "channel", subagent.Channels, catalog.Channels)
+			if len(subagent.Channels) > 0 {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("%s declares channels, but Eve channels are root-only and are not generated for subagents", scope))
+			}
 			for _, policy := range subagent.Approvals {
 				validatePolicy(report, scope, policy, catalog)
+			}
+			for tool, policy := range subagent.Approvals {
+				warnMissingBlocking(report, scope, tool, policy, catalog)
 			}
 			if subagent.RuntimePolicy != nil {
 				tools := make(config.ComponentMap)
@@ -238,11 +254,39 @@ func validatePolicy(report *ValidationReport, scope, policy string, catalog *con
 	}
 }
 
+// warnMissingBlocking warns when an approval policy assigned to a tool does not
+// declare `blocking`, so the rendered approval gate defaults to always() and the
+// policy's semantics depend on prose rather than a typed field.
+func warnMissingBlocking(report *ValidationReport, scope, tool, policy string, catalog *config.CatalogManifest) {
+	component, ok := catalog.Approvals[policy]
+	if !ok {
+		return
+	}
+	if component.Blocking != nil {
+		return
+	}
+	report.Warnings = append(report.Warnings, fmt.Sprintf("%s approval policy '%s' for tool '%s' does not declare blocking; the rendered gate defaults to always() (blocking)", scope, policy, tool))
+}
+
 func validateNamedList(report *ValidationReport, scope, kind string, names []string, catalog map[string]config.CatalogComponent) {
 	for _, name := range names {
 		if _, ok := catalog[name]; !ok {
 			report.Errors = append(report.Errors, fmt.Sprintf("%s references missing %s '%s'", scope, kind, name))
 		}
+	}
+}
+
+// validateChannelList validates channel names, treating known platform presets
+// (slack, telegram, ...) as implicitly available even without a catalog entry.
+func validateChannelList(report *ValidationReport, scope string, names []string, catalog map[string]config.CatalogComponent) {
+	for _, name := range names {
+		if _, ok := catalog[name]; ok {
+			continue
+		}
+		if config.IsPresetChannel(name) {
+			continue
+		}
+		report.Errors = append(report.Errors, fmt.Sprintf("%s references missing channel '%s'; add it to catalog.yml or use a platform preset such as slack or telegram", scope, name))
 	}
 }
 

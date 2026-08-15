@@ -1,14 +1,25 @@
 package doctor
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/DSamuelHodge/eve-rails-cli-go/internal/config"
+	"github.com/DSamuelHodge/eve-rails-cli-go/internal/render"
 )
 
 func readSideEffects(effects config.SideEffects) *config.SideEffects {
 	return &effects
+}
+
+func testTemplatesDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(filepath.Join("..", "..", "templates", "agent"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func testCatalog() *config.CatalogManifest {
@@ -189,5 +200,169 @@ func TestDoctorReportsMissingChannelConfig(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected channel-config failure, checks: %+v", report.Checks)
+	}
+}
+
+func TestValidateChannelAcceptsPresets(t *testing.T) {
+	catalog := testCatalog()
+	catalog.Channels = map[string]config.CatalogComponent{}
+	manifest := testManifest()
+	manifest.Agents[0].Channels = []string{"slack", "telegram"}
+	report := ValidateManifest(manifest, catalog)
+	for _, err := range report.Errors {
+		if strings.Contains(err, "missing channel") {
+			t.Fatalf("expected preset channels to pass, got error: %s", err)
+		}
+	}
+}
+
+func TestValidateChannelRejectsUnknown(t *testing.T) {
+	catalog := testCatalog()
+	catalog.Channels = map[string]config.CatalogComponent{}
+	manifest := testManifest()
+	manifest.Agents[0].Channels = []string{"my_custom_surface"}
+	report := ValidateManifest(manifest, catalog)
+	found := false
+	for _, err := range report.Errors {
+		if strings.Contains(err, "missing channel 'my_custom_surface'") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected unknown channel to be rejected, errors: %v", report.Errors)
+	}
+}
+
+func TestValidateSubagentChannelsWarn(t *testing.T) {
+	manifest := testManifest()
+	manifest.Agents[0].Subagents = config.SubagentList{
+		{Name: "triage", Channels: []string{"slack"}},
+	}
+	report := ValidateManifest(manifest, testCatalog())
+	found := false
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning, "channels are root-only") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected subagent channel warning, warnings: %v", report.Warnings)
+	}
+}
+
+func TestValidateDefaultsToolsSkillsMemory(t *testing.T) {
+	manifest := testManifest()
+	manifest.Defaults.Tools = config.ComponentMap{"search": "1.0.0"}
+	manifest.Defaults.Skills = config.ComponentMap{"summarize": "1.0.0"}
+	manifest.Defaults.Memory = config.ComponentMap{"crm": "1.0.0"}
+	report := ValidateManifest(manifest, testCatalog())
+	if len(report.Errors) != 0 {
+		t.Fatalf("expected valid defaults to pass, errors: %v", report.Errors)
+	}
+}
+
+func TestValidateDefaultsMissingToolFails(t *testing.T) {
+	manifest := testManifest()
+	manifest.Defaults.Tools = config.ComponentMap{"ghost_tool": "1.0.0"}
+	report := ValidateManifest(manifest, testCatalog())
+	found := false
+	for _, err := range report.Errors {
+		if strings.Contains(err, "missing tool 'ghost_tool'") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected missing defaults tool to fail, errors: %v", report.Errors)
+	}
+}
+
+func TestValidateApprovalPolicyMissingBlockingWarns(t *testing.T) {
+	catalog := testCatalog()
+	catalog.Approvals = map[string]config.CatalogComponent{
+		"required": {Version: "1.0.0"},
+	}
+	manifest := testManifest()
+	manifest.Agents[0].Tools = config.ComponentMap{"search": "1.0.0"}
+	manifest.Agents[0].Approvals = map[string]string{"search": "required"}
+	report := ValidateManifest(manifest, catalog)
+	found := false
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning, "does not declare blocking") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected missing-blocking warning, warnings: %v", report.Warnings)
+	}
+}
+
+func TestValidateApprovalPolicyBlockingDeclaredNoWarn(t *testing.T) {
+	catalog := testCatalog()
+	blocking := true
+	catalog.Approvals = map[string]config.CatalogComponent{
+		"required": {Version: "1.0.0", Blocking: &blocking},
+	}
+	manifest := testManifest()
+	manifest.Agents[0].Tools = config.ComponentMap{"search": "1.0.0"}
+	manifest.Agents[0].Approvals = map[string]string{"search": "required"}
+	report := ValidateManifest(manifest, catalog)
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning, "does not declare blocking") {
+			t.Fatalf("unexpected missing-blocking warning: %v", warning)
+		}
+	}
+}
+
+func TestRenderedApprovalGateChecksMatch(t *testing.T) {
+	catalog := testCatalog()
+	blocking := true
+	catalog.Approvals = map[string]config.CatalogComponent{
+		"required": {Version: "1.0.0", Blocking: &blocking},
+	}
+	manifest := testManifest()
+	manifest.Agents[0].Approvals = map[string]string{"search": "required"}
+	plan, err := render.PlanBatch(manifest, catalog, testTemplatesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checks []Check
+	addRenderedApprovalGateChecks(&checks, manifest, catalog, plan)
+	for _, check := range checks {
+		if check.Name != "rendered-approval-gates" {
+			continue
+		}
+		if check.Status != StatusPass {
+			t.Fatalf("expected rendered-approval-gates to pass, got: %s", check.Message)
+		}
+	}
+}
+
+func TestRenderedApprovalGateChecksCatchMismatch(t *testing.T) {
+	catalog := testCatalog()
+	blocking := true
+	catalog.Approvals = map[string]config.CatalogComponent{
+		"required": {Version: "1.0.0", Blocking: &blocking},
+	}
+	manifest := testManifest()
+	manifest.Agents[0].Approvals = map[string]string{"search": "required"}
+	plan, err := render.PlanBatch(manifest, catalog, testTemplatesDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range plan.Operations {
+		if strings.HasSuffix(plan.Operations[i].Path, "tools/search.ts") {
+			plan.Operations[i].Content = strings.ReplaceAll(
+				plan.Operations[i].Content, "approval: always()", "approval: never()")
+		}
+	}
+	var checks []Check
+	addRenderedApprovalGateChecks(&checks, manifest, catalog, plan)
+	for _, check := range checks {
+		if check.Name != "rendered-approval-gates" {
+			continue
+		}
+		if check.Status != StatusFail {
+			t.Fatalf("expected rendered-approval-gates to fail on mismatch, got: %s", check.Status)
+		}
 	}
 }

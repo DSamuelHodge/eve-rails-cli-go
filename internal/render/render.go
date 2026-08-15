@@ -30,6 +30,7 @@ var TemplateNames = []string{
 	"memory.ts.tmpl",
 	"fixture.json.tmpl",
 	"agent.README.md.tmpl",
+	"sandbox.ts.tmpl",
 }
 
 // Renderer renders agent outputs from templates.
@@ -159,10 +160,30 @@ func (r *Renderer) RenderAgent(agent *config.AgentManifest, manifest *config.Fle
 		{Path: filepath.Join(outputRoot, "agent.manifest.yml"), Content: renderAgentManifest(agent, manifest)},
 	}
 
+	if sandboxName := EffectiveSandbox(agent); sandboxName != "" {
+		sandboxTS, err := r.render("sandbox.ts.tmpl", map[string]any{
+			"sandbox": map[string]any{
+				"Sandbox":              sandboxName,
+				"NetworkPolicyLiteral": TSStringLiteral(SandboxNetworkPolicy(sandboxName)),
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, RenderedFile{
+			Path:    filepath.Join(outputRoot, "sandbox.ts"),
+			Content: WithGeneratedHeader(CommentStyleSlash, agent.Name, "sandbox.ts.tmpl", sandboxTS),
+		})
+	}
+
 	for _, channel := range config.EffectiveStringList(manifest.Defaults.Channels, agent.Channels) {
 		component, ok := catalog.Channels[channel]
 		if !ok {
-			continue
+			preset := PresetChannel(channel)
+			if preset == nil {
+				continue
+			}
+			component = *preset
 		}
 		if component.Kind == "" || component.Kind == "eve" {
 			continue
@@ -173,50 +194,15 @@ func (r *Renderer) RenderAgent(agent *config.AgentManifest, manifest *config.Fle
 		})
 	}
 
-	for _, component := range versioning.EffectiveComponents(manifest.Shared.Tools, agent.Tools) {
-		catalogComponent, ok := catalog.Tools[component.Name]
-		description := fmt.Sprintf("%s generated tool contract.", component.Name)
-		sideEffects := "read"
-		if ok {
-			if catalogComponent.Description != "" {
-				description = catalogComponent.Description
-			} else if catalogComponent.SideEffects != nil {
-				description = fmt.Sprintf("Generated %s %s tool contract.", component.Name, *catalogComponent.SideEffects)
-			}
-			if catalogComponent.SideEffects != nil {
-				sideEffects = string(*catalogComponent.SideEffects)
-			}
-		}
-		var requiredApprovals, requiredEnv, requiredConnectors, sandboxCompatibility, failureModes []string
-		if ok {
-			requiredApprovals = catalogComponent.RequiredApprovals
-			requiredEnv = catalogComponent.RequiredEnv
-			requiredConnectors = catalogComponent.RequiredConnectors
-			sandboxCompatibility = catalogComponent.SandboxCompatibility
-			failureModes = catalogComponent.FailureModes
-		}
-		toolContext := map[string]any{
-			"NameLiteral":                 TSStringLiteral(component.Name),
-			"VersionLiteral":              TSStringLiteral(component.Version),
-			"DescriptionLiteral":          TSStringLiteral(fmt.Sprintf("%s Side effects: %s.", description, sideEffects)),
-			"SideEffectsLiteral":          TSStringLiteral(sideEffects),
-			"RequiredApprovalsLiteral":    TSStringArrayLiteral(requiredApprovals),
-			"RequiredEnvLiteral":          TSStringArrayLiteral(requiredEnv),
-			"RequiredConnectorsLiteral":   TSStringArrayLiteral(requiredConnectors),
-			"SandboxCompatibilityLiteral": TSStringArrayLiteral(sandboxCompatibility),
-			"FailureModesLiteral":         TSStringArrayLiteral(failureModes),
-		}
-		toolTS, err := r.render("tool.ts.tmpl", map[string]any{"tool": toolContext})
+	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Tools, manifest.Shared.Tools, agent.Tools) {
+		file, err := r.renderToolFile(agent.Name, component.Name, component.Version, filepath.Join(outputRoot, "tools"), agent.Approvals, catalog)
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, RenderedFile{
-			Path:    filepath.Join(outputRoot, "tools", component.Name+".ts"),
-			Content: WithGeneratedHeader(CommentStyleSlash, agent.Name, "tool.ts.tmpl", toolTS),
-		})
+		files = append(files, file)
 	}
 
-	for _, component := range versioning.EffectiveComponents(manifest.Shared.Skills, agent.Skills) {
+	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Skills, manifest.Shared.Skills, agent.Skills) {
 		skillContext := map[string]any{
 			"Name":    component.Name,
 			"Version": component.Version,
@@ -239,14 +225,20 @@ func (r *Renderer) RenderAgent(agent *config.AgentManifest, manifest *config.Fle
 		if subagentModel == "" {
 			subagentModel = model
 		}
+		subagentRoot := filepath.Join(outputRoot, "subagents", subagent.Name)
 		files = append(files, RenderedFile{
-			Path:    filepath.Join(outputRoot, "subagents", subagent.Name, "instructions.md"),
+			Path:    filepath.Join(subagentRoot, "instructions.md"),
 			Content: renderSubagentPlaceholder(agent.Name, subagent, role),
 		})
 		files = append(files, RenderedFile{
-			Path:    filepath.Join(outputRoot, "subagents", subagent.Name, "agent.ts"),
+			Path:    filepath.Join(subagentRoot, "agent.ts"),
 			Content: renderSubagentAgentTS(agent.Name, subagent, subagentModel, role),
 		})
+		subagentFiles, err := r.renderSubagentFiles(subagent, subagentRoot, catalog)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, subagentFiles...)
 	}
 
 	for approval, policy := range agent.Approvals {
@@ -280,7 +272,7 @@ func (r *Renderer) RenderAgent(agent *config.AgentManifest, manifest *config.Fle
 		})
 	}
 
-	for _, component := range versioning.EffectiveComponents(manifest.Shared.Memory, agent.Memory) {
+	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Memory, manifest.Shared.Memory, agent.Memory) {
 		retention := "session"
 		if c, ok := catalog.Memory[component.Name]; ok && c.Retention != "" {
 			retention = c.Retention
@@ -348,4 +340,100 @@ func SubagentNames(agent *config.AgentManifest) []string {
 		names = append(names, agent.Subagents[i].Name)
 	}
 	return names
+}
+
+// renderToolFile renders a single tool contract file under toolsRoot.
+func (r *Renderer) renderToolFile(owner, name, version, toolsRoot string, approvals map[string]string, catalog *config.CatalogManifest) (RenderedFile, error) {
+	catalogComponent, ok := catalog.Tools[name]
+	description := fmt.Sprintf("%s generated tool contract.", name)
+	sideEffects := "read"
+	if ok {
+		if catalogComponent.Description != "" {
+			description = catalogComponent.Description
+		} else if catalogComponent.SideEffects != nil {
+			description = fmt.Sprintf("Generated %s %s tool contract.", name, *catalogComponent.SideEffects)
+		}
+		if catalogComponent.SideEffects != nil {
+			sideEffects = string(*catalogComponent.SideEffects)
+		}
+	}
+	var requiredApprovals, requiredEnv, requiredConnectors, sandboxCompatibility, failureModes []string
+	if ok {
+		requiredApprovals = catalogComponent.RequiredApprovals
+		requiredEnv = catalogComponent.RequiredEnv
+		requiredConnectors = catalogComponent.RequiredConnectors
+		sandboxCompatibility = catalogComponent.SandboxCompatibility
+		failureModes = catalogComponent.FailureModes
+	}
+	gate := config.ApprovalGateFor(name, approvals, catalog)
+	approvalHelper := gate
+	if strings.HasSuffix(approvalHelper, "()") {
+		approvalHelper = strings.TrimSuffix(approvalHelper, "()")
+	}
+	toolContext := map[string]any{
+		"NameLiteral":                 TSStringLiteral(name),
+		"VersionLiteral":              TSStringLiteral(version),
+		"DescriptionLiteral":          TSStringLiteral(fmt.Sprintf("%s Side effects: %s.", description, sideEffects)),
+		"SideEffectsLiteral":          TSStringLiteral(sideEffects),
+		"ApprovalHelper":              approvalHelper,
+		"ApprovalLiteral":             gate,
+		"RequiredApprovalsLiteral":    TSStringArrayLiteral(requiredApprovals),
+		"RequiredEnvLiteral":          TSStringArrayLiteral(requiredEnv),
+		"RequiredConnectorsLiteral":   TSStringArrayLiteral(requiredConnectors),
+		"SandboxCompatibilityLiteral": TSStringArrayLiteral(sandboxCompatibility),
+		"FailureModesLiteral":         TSStringArrayLiteral(failureModes),
+	}
+	toolTS, err := r.render("tool.ts.tmpl", map[string]any{"tool": toolContext})
+	if err != nil {
+		return RenderedFile{}, err
+	}
+	return RenderedFile{
+		Path:    filepath.Join(toolsRoot, name+".ts"),
+		Content: WithGeneratedHeader(CommentStyleSlash, owner, "tool.ts.tmpl", toolTS),
+	}, nil
+}
+
+// renderSubagentFiles renders the tools, skills, and memory slots a declared
+// subagent authors for itself, mirroring Eve's rule that a subagent discovers
+// its own slots rather than inheriting the root's.
+func (r *Renderer) renderSubagentFiles(subagent *config.SubagentManifest, subagentRoot string, catalog *config.CatalogManifest) ([]RenderedFile, error) {
+	var files []RenderedFile
+	for _, tool := range subagent.Tools {
+		file, err := r.renderToolFile(subagent.Name, tool, "catalog", filepath.Join(subagentRoot, "tools"), subagent.Approvals, catalog)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	for _, skill := range subagent.Skills {
+		skillContext := map[string]any{
+			"Name":    skill,
+			"Version": "catalog",
+			"Trigger": fmt.Sprintf("the %s capability is relevant to the user's request", skill),
+		}
+		skillMD, err := r.render("skill.md.tmpl", map[string]any{"skill": skillContext})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, RenderedFile{
+			Path:    filepath.Join(subagentRoot, "skills", skill+".md"),
+			Content: WithGeneratedHeader(CommentStyleHash, subagent.Name, "skill.md.tmpl", skillMD),
+		})
+	}
+	for _, memory := range subagent.Memory {
+		memoryContext := map[string]any{
+			"Name":      memory,
+			"Version":   "catalog",
+			"Retention": "session",
+		}
+		memoryTS, err := r.render("memory.ts.tmpl", map[string]any{"memory": memoryContext})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, RenderedFile{
+			Path:    filepath.Join(subagentRoot, "memory", memory+".ts"),
+			Content: WithGeneratedHeader(CommentStyleSlash, subagent.Name, "memory.ts.tmpl", memoryTS),
+		})
+	}
+	return files, nil
 }

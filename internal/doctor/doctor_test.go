@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -364,5 +365,101 @@ func TestRenderedApprovalGateChecksCatchMismatch(t *testing.T) {
 		if check.Status != StatusFail {
 			t.Fatalf("expected rendered-approval-gates to fail on mismatch, got: %s", check.Status)
 		}
+	}
+}
+
+func TestDoctorAllEnablesTemplateAndUpdateChecks(t *testing.T) {
+	catalog := testCatalog()
+	blocking := true
+	catalog.Approvals = map[string]config.CatalogComponent{
+		"required": {Version: "1.0.0", Blocking: &blocking},
+	}
+	manifest := testManifest()
+	manifest.Agents[0].Approvals = map[string]string{"search": "required"}
+	templateDir := testTemplatesDir(t)
+
+	temp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(temp); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	plan, err := render.PlanBatch(manifest, catalog, templateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range plan.Operations {
+		if parent := filepath.Dir(operation.Path); parent != "." && parent != "" {
+			if err := os.MkdirAll(parent, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(operation.Path, []byte(operation.Content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := RunDoctor(manifest, catalog, Options{All: true, TemplateDir: templateDir})
+	if err != nil {
+		t.Fatalf("unexpected doctor error: %v", err)
+	}
+	names := map[string]bool{}
+	for _, check := range report.Checks {
+		names[check.Name] = true
+	}
+	for _, name := range []string{"rendered-approval-gates", "generated-output-fresh"} {
+		if !names[name] {
+			t.Errorf("expected check %s when Options.All is true, checks: %+v", name, report.Checks)
+		}
+	}
+	if !names["lockfiles-present"] && !names["lockfiles-current"] {
+		t.Errorf("expected lockfiles-present and/or lockfiles-current when Options.All is true, checks: %+v", report.Checks)
+	}
+}
+
+func TestProjectTemplatesMatchEmbeddedFailsOnV010Shape(t *testing.T) {
+	src := testTemplatesDir(t)
+	dest := t.TempDir()
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "sandbox.ts.tmpl" {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(src, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.Name() == "tool.ts.tmpl" {
+			var kept []string
+			for _, line := range strings.Split(string(content), "\n") {
+				if strings.Contains(strings.ToLower(line), "approval") {
+					continue
+				}
+				kept = append(kept, line)
+			}
+			content = []byte(strings.Join(kept, "\n"))
+		}
+		if err := os.WriteFile(filepath.Join(dest, entry.Name()), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var checks []Check
+	addProjectTemplateChecks(&checks, dest)
+	found := false
+	for _, check := range checks {
+		if check.Name == "project-templates-match-embedded" && check.Status == StatusFail {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected project-templates-match-embedded to fail on v0.1.0-shaped templates, checks: %+v", checks)
 	}
 }

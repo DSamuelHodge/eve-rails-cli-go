@@ -137,3 +137,32 @@ func TestGenerateSubagentPlansInstructions(t *testing.T) {
 		t.Errorf("unexpected content: %s", changes[0].Content)
 	}
 }
+
+func TestGenerateToolStubIsDefineTool(t *testing.T) {
+	temp := t.TempDir()
+	options := Options{
+		Name:        "search",
+		Version:     "1.0.0",
+		SideEffects: "read",
+		Catalog:     filepath.Join(temp, "catalog.yml"),
+	}
+	changes, err := Plan(KindTool, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stub string
+	for _, change := range changes {
+		if strings.Contains(change.Path, "catalog/tools/search.ts") {
+			stub = change.Content
+		}
+	}
+	if stub == "" {
+		t.Fatal("expected tool stub content")
+	}
+	if !strings.Contains(stub, "defineTool") {
+		t.Errorf("expected defineTool in stub, got:\n%s", stub)
+	}
+	if strings.Contains(stub, "throw new Error") {
+		t.Errorf("expected stub not to contain throw new Error, got:\n%s", stub)
+	}
+}

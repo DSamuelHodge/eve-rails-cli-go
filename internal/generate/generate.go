@@ -333,7 +333,34 @@ func componentStub(kind Kind, options Options) (*Change, error) {
 	switch kind {
 	case KindTool:
 		dir, extension = "tools", "ts"
-		content = fmt.Sprintf("export async function %s() {\n  throw new Error(\"%s is not implemented yet\");\n}\n", options.Name, options.Name)
+		{
+			sideEffects := defaultString(options.SideEffects, "read")
+			description := fmt.Sprintf("%s generated tool contract. Side effects: %s.", options.Name, sideEffects)
+			content = fmt.Sprintf(`import { defineTool } from "eve/tools";
+import { never } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: %s,
+  approval: never(),
+  inputSchema: z.object({}),
+  async execute() {
+    return {
+      status: "not_implemented",
+      tool: %s,
+      contract: {
+        sideEffects: %s,
+        requiredApprovals: [],
+        requiredEnv: [],
+        requiredConnectors: [],
+        sandboxCompatibility: [],
+        failureModes: [],
+      },
+    };
+  },
+});
+`, quoted(description), quoted(options.Name), quoted(sideEffects))
+		}
 	case KindSkill:
 		dir, extension = "skills", "md"
 		content = fmt.Sprintf("# %s\n\n## Trigger\n\nUse this skill when ...\n\n## Procedure\n\n- Gather context.\n- Use approved tools.\n- Verify the result.\n", options.Name)

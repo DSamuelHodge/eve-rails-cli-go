@@ -203,19 +203,11 @@ func (r *Renderer) RenderAgent(agent *config.AgentManifest, manifest *config.Fle
 	}
 
 	for _, component := range versioning.EffectiveComponentsFromDefaults(manifest.Defaults.Skills, manifest.Shared.Skills, agent.Skills) {
-		skillContext := map[string]any{
-			"Name":    component.Name,
-			"Version": component.Version,
-			"Trigger": fmt.Sprintf("the %s capability is relevant to the user's request", component.Name),
-		}
-		skillMD, err := r.render("skill.md.tmpl", map[string]any{"skill": skillContext})
+		file, err := r.renderSkillFile(agent.Name, component.Name, component.Version, filepath.Join(outputRoot, "skills"))
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, RenderedFile{
-			Path:    filepath.Join(outputRoot, "skills", component.Name+".md"),
-			Content: WithGeneratedHeader(CommentStyleHash, agent.Name, "skill.md.tmpl", skillMD),
-		})
+		files = append(files, file)
 	}
 
 	for i := range agent.Subagents {
@@ -342,6 +334,45 @@ func SubagentNames(agent *config.AgentManifest) []string {
 	return names
 }
 
+func catalogSkillMarkdown(name string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join("catalog", "skills", name+".md"))
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
+
+func catalogSkillVersion(name string, catalog *config.CatalogManifest) string {
+	if catalog != nil {
+		if component, ok := catalog.Skills[name]; ok && component.Version != "" {
+			return component.Version
+		}
+	}
+	return "1.0.0"
+}
+
+func (r *Renderer) renderSkillFile(owner, name, version, skillsRoot string) (RenderedFile, error) {
+	var skillMD string
+	if body, ok := catalogSkillMarkdown(name); ok {
+		skillMD = body
+	} else {
+		skillContext := map[string]any{
+			"Name":    name,
+			"Version": version,
+			"Trigger": fmt.Sprintf("the %s capability is relevant to the user's request", name),
+		}
+		rendered, err := r.render("skill.md.tmpl", map[string]any{"skill": skillContext})
+		if err != nil {
+			return RenderedFile{}, err
+		}
+		skillMD = rendered
+	}
+	return RenderedFile{
+		Path:    filepath.Join(skillsRoot, name+".md"),
+		Content: WithGeneratedHeader(CommentStyleHash, owner, "skill.md.tmpl", skillMD),
+	}, nil
+}
+
 // renderToolFile renders a single tool contract file under toolsRoot.
 func (r *Renderer) renderToolFile(owner, name, version, toolsRoot string, approvals map[string]string, catalog *config.CatalogManifest) (RenderedFile, error) {
 	catalogComponent, ok := catalog.Tools[name]
@@ -406,19 +437,11 @@ func (r *Renderer) renderSubagentFiles(subagent *config.SubagentManifest, subage
 		files = append(files, file)
 	}
 	for _, skill := range subagent.Skills {
-		skillContext := map[string]any{
-			"Name":    skill,
-			"Version": "catalog",
-			"Trigger": fmt.Sprintf("the %s capability is relevant to the user's request", skill),
-		}
-		skillMD, err := r.render("skill.md.tmpl", map[string]any{"skill": skillContext})
+		file, err := r.renderSkillFile(subagent.Name, skill, catalogSkillVersion(skill, catalog), filepath.Join(subagentRoot, "skills"))
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, RenderedFile{
-			Path:    filepath.Join(subagentRoot, "skills", skill+".md"),
-			Content: WithGeneratedHeader(CommentStyleHash, subagent.Name, "skill.md.tmpl", skillMD),
-		})
+		files = append(files, file)
 	}
 	for _, memory := range subagent.Memory {
 		memoryContext := map[string]any{

@@ -141,9 +141,9 @@ agents:
 AGENTS
 (
   cd "$TMP2"
-  "$BIN" doctor --all --manifest manifests/agents.yml --catalog manifests/catalog.yml >/dev/null
+  "$BIN" doctor --manifest manifests/agents.yml --catalog manifests/catalog.yml >/dev/null
   "$BIN" apply manifests/agents.yml --catalog manifests/catalog.yml --template-dir "$ROOT/templates/agent" >/dev/null
-  "$BIN" doctor --all --templates --manifest manifests/agents.yml --catalog manifests/catalog.yml --template-dir "$ROOT/templates/agent" >/dev/null
+  "$BIN" doctor --all --manifest manifests/agents.yml --catalog manifests/catalog.yml --template-dir "$ROOT/templates/agent" >/dev/null
   test -f agents/support/agent/channels/slack.ts
   test -f agents/support/agent/channels/telegram.ts
   test -f agents/support/agent/tools/search_customers.ts

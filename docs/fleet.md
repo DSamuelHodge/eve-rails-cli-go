@@ -124,7 +124,7 @@ then the side-effect class. A policy assigned without `blocking` defaults to
 
 `eve-rails doctor --templates` also runs a `rendered-approval-gates` check that
 re-renders each tool and asserts the gate in the output matches the manifest's
-approval-policy assignment.
+approval-policy assignment. `--all` implies `--templates` and `--updates`.
 
 Sandbox boundaries in `x_runtime_policy.sandbox` render a real `agent/sandbox.ts`
 with a network policy: `read-only` and `workspace-write` map to `deny-all`;

@@ -1,0 +1,9 @@
+import { defineEval } from "eve/evals";
+
+export default defineEval({
+  description: "{{ .eval.Name }} generated placeholder eval.",
+  async test(t) {
+    await t.send("Run the {{ .eval.Name }} smoke check.");
+    t.succeeded();
+  },
+});

@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact: eve-rails-cli-go-linux-x86_64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            artifact: eve-rails-cli-go-macos-x86_64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            artifact: eve-rails-cli-go-macos-aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p dist
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            CGO_ENABLED=0 go build -trimpath -o "dist/${{ matrix.artifact }}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          expected=3
+          actual="$(find . -maxdepth 1 -type f -name 'eve-rails-cli-go-*' | wc -l | tr -d ' ')"
+          test "$actual" = "$expected"
+          sha256sum eve-rails-cli-go-* | sort -k2 > SHA256SUMS
+          test "$(wc -l < SHA256SUMS | tr -d ' ')" = "$expected"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -1,0 +1,6 @@
+import { defineSchedule } from "eve/schedules";
+
+export default defineSchedule({
+  cron: "{{ .schedule.Schedule }}",
+  markdown: "Run scheduled task {{ .schedule.Name }} and report only material findings.",
+});

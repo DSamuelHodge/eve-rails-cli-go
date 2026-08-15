@@ -2,6 +2,8 @@ module github.com/DSamuelHodge/eve-rails-cli-go
 
 go 1.26.5
 
+retract v1.0.0
+
 require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/spf13/cobra v1.10.2

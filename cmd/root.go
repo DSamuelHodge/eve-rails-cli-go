@@ -11,7 +11,7 @@ var rootCmd = &cobra.Command{
 	Use:           "eve-rails",
 	Short:         "Rails-inspired convention layer for Eve agent fleets",
 	Long:          "eve-rails is a Rails-inspired convention layer for Eve agent fleets.",
-	Version:       "0.1.1",
+	Version:       "0.1.2",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	CompletionOptions: cobra.CompletionOptions{
@@ -30,6 +30,7 @@ func Execute() {
 func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(wizardCmd)
+	rootCmd.AddCommand(templatesCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(renderCmd)

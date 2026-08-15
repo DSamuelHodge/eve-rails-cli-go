@@ -43,35 +43,79 @@ func newRuntimeCmd(kind runtimeKind) *cobra.Command {
 			agentDir := filepath.Join("agents", agentData.Name)
 			commands := runtimeCommands(kind)
 
+			if dryRun || kind == runtimePreview {
+				if kind == runtimePreview {
+					if jsonOutput {
+						return printJSON(map[string]any{
+							"agent":     agentOpt,
+							"env":       env,
+							"kind":      kind,
+							"agent_dir": agentDir,
+							"dry_run":   true,
+							"commands":  commands,
+						})
+					}
+					fmt.Println("Preview is long-running; run the command above to start Eve dev.")
+				}
+				if jsonOutput {
+					return printJSON(map[string]any{
+						"agent":     agentOpt,
+						"env":       env,
+						"kind":      kind,
+						"agent_dir": agentDir,
+						"dry_run":   true,
+						"commands":  commands,
+					})
+				}
+				fmt.Printf("%s for agent %s\n", kind, agentData.Name)
+				for _, commandLine := range commands {
+					fmt.Printf("$ %s\n", joinCommand(commandLine))
+				}
+				return nil
+			}
+
+			results := make([]map[string]any, 0, len(commands))
+			for _, commandLine := range commands {
+				err := process.Run(agentDir, commandLine)
+				results = append(results, map[string]any{
+					"command": joinCommand(commandLine),
+					"ok":      err == nil,
+					"error":   errorString(err),
+				})
+				if err != nil {
+					if jsonOutput {
+						return printJSON(map[string]any{
+							"agent":     agentOpt,
+							"env":       env,
+							"kind":      kind,
+							"agent_dir": agentDir,
+							"dry_run":   false,
+							"results":   results,
+						})
+					}
+					return err
+				}
+			}
 			if jsonOutput {
 				return printJSON(map[string]any{
 					"agent":     agentOpt,
 					"env":       env,
 					"kind":      kind,
 					"agent_dir": agentDir,
-					"dry_run":   dryRun,
-					"commands":  commands,
+					"dry_run":   false,
+					"results":   results,
 				})
-			}
-
-			fmt.Printf("%s for agent %s\n", kind, agentData.Name)
-			for _, commandLine := range commands {
-				fmt.Printf("$ %s\n", joinCommand(commandLine))
-			}
-			if dryRun || kind == runtimePreview {
-				if kind == runtimePreview {
-					fmt.Println("Preview is long-running; run the command above to start Eve dev.")
-				}
-				return nil
-			}
-			for _, commandLine := range commands {
-				if err := process.Run(agentDir, commandLine); err != nil {
-					return err
-				}
 			}
 			return nil
 		},
 	}
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func runtimeShort(kind runtimeKind) string {

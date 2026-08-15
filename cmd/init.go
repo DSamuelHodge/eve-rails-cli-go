@@ -25,10 +25,10 @@ var initCmd = &cobra.Command{
 				return err
 			}
 		}
-		if jsonOutput {
-			return printInitJSON(name, changes)
-		}
 		if dryRun {
+			if jsonOutput {
+				return printInitJSON(name, changes)
+			}
 			fmt.Printf("Init '%s' (%s) dry run\n", name, template)
 			for _, change := range changes {
 				fmt.Printf("%s %s\n", change.Action, change.Path)
@@ -45,6 +45,9 @@ var initCmd = &cobra.Command{
 				return fmt.Errorf("failed to write '%s': %w", change.Path, err)
 			}
 			fmt.Printf("%s %s\n", change.Action, change.Path)
+		}
+		if jsonOutput {
+			return printInitJSON(name, changes)
 		}
 		return nil
 	},

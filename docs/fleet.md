@@ -62,10 +62,10 @@ should have approval coverage before deployment. `doctor` checks this so risky
 tools do not quietly ship without a policy.
 
 ```sh
-eve-rails-cli-go doctor --all
-eve-rails-cli-go apply manifests/agents.yml
-eve-rails-cli-go render --all --check
+eve-rails doctor --all
+eve-rails apply manifests/agents.yml
+eve-rails render --all --check
 ```
 
-Use `eve-rails-cli-go --help` and `eve-rails-cli-go <command> --help` for the current
+Use `eve-rails --help` and `eve-rails <command> --help` for the current
 command flags.

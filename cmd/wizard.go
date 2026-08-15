@@ -304,7 +304,7 @@ func wizardAgentConfirm(state *wizard.State) error {
 		return err
 	}
 	if !apply {
-		fmt.Println("Stopped before applying; run 'eve-rails-cli-go apply' when ready.")
+		fmt.Println("Stopped before applying; run 'eve-rails apply' when ready.")
 		return nil
 	}
 	return applyBatch(manifestData, catalogData)

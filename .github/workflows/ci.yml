@@ -64,12 +64,12 @@ jobs:
           node-version: "24"
 
       - name: Build CLI
-        run: go build -o bin/eve-rails-cli-go .
+        run: go build -o bin/eve-rails .
 
       - name: Generate smoke agent
         run: |
           set -euo pipefail
-          BIN="$PWD/bin/eve-rails-cli-go"
+          BIN="$PWD/bin/eve-rails"
           TMP="$(mktemp -d)"
           echo "EVE_RAILS_SMOKE=$TMP/demo" >> "$GITHUB_ENV"
           "$BIN" init "$TMP/demo" --template basic --model openai/gpt-5.5 --owner ci --yes

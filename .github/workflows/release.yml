@@ -19,15 +19,15 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            artifact: eve-rails-cli-go-linux-x86_64
+            artifact: eve-rails-linux-x86_64
           - os: macos-latest
             goos: darwin
             goarch: amd64
-            artifact: eve-rails-cli-go-macos-x86_64
+            artifact: eve-rails-macos-x86_64
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            artifact: eve-rails-cli-go-macos-aarch64
+            artifact: eve-rails-macos-aarch64
 
     steps:
       - name: Checkout
@@ -68,9 +68,9 @@ jobs:
           set -euo pipefail
           cd dist
           expected=3
-          actual="$(find . -maxdepth 1 -type f -name 'eve-rails-cli-go-*' | wc -l | tr -d ' ')"
+          actual="$(find . -maxdepth 1 -type f -name 'eve-rails-*' | wc -l | tr -d ' ')"
           test "$actual" = "$expected"
-          sha256sum eve-rails-cli-go-* | sort -k2 > SHA256SUMS
+          sha256sum eve-rails-* | sort -k2 > SHA256SUMS
           test "$(wc -l < SHA256SUMS | tr -d ' ')" = "$expected"
 
       - name: Create release

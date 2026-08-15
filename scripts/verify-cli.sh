@@ -3,7 +3,7 @@ set -euo pipefail
 trap 'echo "CLI acceptance failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/bin/eve-rails-cli-go"
+BIN="$ROOT/bin/eve-rails"
 
 cd "$ROOT"
 

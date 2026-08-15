@@ -39,15 +39,22 @@ cd eve-rails-cli-go
 go install github.com/DSamuelHodge/eve-rails-cli-go@latest
 ```
 
+The module path still ends in `eve-rails-cli-go`, so the installed binary
+keeps that name; rename it once to match the short command used below:
+
+```sh
+mv "$(go env GOPATH)/bin/eve-rails-cli-go" "$(go env GOPATH)/bin/eve-rails"
+```
+
 ### 2. Create one agent
 
 ```sh
-eve-rails-cli-go init my-project --yes
+eve-rails init my-project --yes
 cd my-project
 
-eve-rails-cli-go generate agent support
-eve-rails-cli-go apply manifests/agents.yml
-eve-rails-cli-go doctor --all
+eve-rails generate agent support
+eve-rails apply manifests/agents.yml
+eve-rails doctor --all
 ```
 
 You now have a working Eve agent in `agents/support/`.
@@ -55,8 +62,8 @@ You now have a working Eve agent in `agents/support/`.
 ### 3. Add reusable pieces
 
 ```sh
-eve-rails-cli-go generate tool search_customers --side-effects read
-eve-rails-cli-go generate skill triage_customer_issue
+eve-rails generate tool search_customers --side-effects read
+eve-rails generate skill triage_customer_issue
 ```
 
 Then attach them to `support` in `manifests/agents.yml`:
@@ -71,7 +78,7 @@ agents:
 ```
 
 ```sh
-eve-rails-cli-go apply manifests/agents.yml
+eve-rails apply manifests/agents.yml
 ```
 
 Tools and skills live in `manifests/catalog.yml` so they can be reused across
@@ -106,7 +113,7 @@ agents:
       triage_customer_issue: 1.0.0
 ```
 
-Edit the YAML by hand any time. Run `eve-rails-cli-go apply manifests/agents.yml`
+Edit the YAML by hand any time. Run `eve-rails apply manifests/agents.yml`
 again after manual edits to re-render generated agents.
 
 ### 5. Verify the generated agent
@@ -123,11 +130,11 @@ anything that moves money? See [Building a fleet](docs/fleet.md).
 
 ### Interactive wizard
 
-For a guided, terminal-first setup, run `eve-rails-cli-go wizard` instead of
+For a guided, terminal-first setup, run `eve-rails wizard` instead of
 typing individual `init`/`generate` commands:
 
 ```sh
-eve-rails-cli-go wizard
+eve-rails wizard
 ```
 
 The wizard walks through project init, adding reusable components, creating an
@@ -209,7 +216,7 @@ approvals:
 
 Tools, skills, evals, approvals, channels, schedules, memory, auth, and
 deployment metadata can all be generated and reused this way. Run
-`eve-rails-cli-go <command> --help` for the current options.
+`eve-rails <command> --help` for the current options.
 
 ### Versioning
 
@@ -235,8 +242,8 @@ restore is provably correct: the restored lock re-renders to the same digest.
 
 ## Commands
 
-Use `eve-rails-cli-go --help` for the command list and
-`eve-rails-cli-go <command> --help` for flags.
+Use `eve-rails --help` for the command list and
+`eve-rails <command> --help` for flags.
 
 - Create: `init`, `wizard`, `generate`
 - Render: `plan`, `apply`, `render`

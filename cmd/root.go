@@ -8,9 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "eve-rails-cli-go",
+	Use:           "eve-rails",
 	Short:         "Rails-inspired convention layer for Eve agent fleets",
-	Long:          "eve-rails-cli-go is a Rails-inspired convention layer for Eve agent fleets.",
+	Long:          "eve-rails is a Rails-inspired convention layer for Eve agent fleets.",
 	Version:       "0.1.0",
 	SilenceUsage:  true,
 	SilenceErrors: true,

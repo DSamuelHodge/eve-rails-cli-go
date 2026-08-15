@@ -13,16 +13,16 @@ go test ./...
 For Eve integration checks, install Node.js 24 or newer and generate a disposable agent:
 
 ```sh
-eve-rails-cli-go init /tmp/eve-rails-smoke --template basic --model openai/gpt-5.5 --owner ci --yes
+eve-rails init /tmp/eve-rails-smoke --template basic --model openai/gpt-5.5 --owner ci --yes
 cd /tmp/eve-rails-smoke
-eve-rails-cli-go generate tool search_customers --side-effects read
-eve-rails-cli-go generate skill triage_customer_issue
-eve-rails-cli-go generate channel eve
-eve-rails-cli-go generate schedule weekday_triage --schedule "0 9 * * 1-5"
-eve-rails-cli-go generate eval standard
-eve-rails-cli-go generate memory customer_profile --retention 180d
-eve-rails-cli-go generate agent support --with-tools search_customers --with-skills triage_customer_issue --with-channels eve --with-schedules weekday_triage --with-evals standard --with-memory customer_profile --approval required --auth platform-oauth --visibility internal
-eve-rails-cli-go apply manifests/agents.yml
+eve-rails generate tool search_customers --side-effects read
+eve-rails generate skill triage_customer_issue
+eve-rails generate channel eve
+eve-rails generate schedule weekday_triage --schedule "0 9 * * 1-5"
+eve-rails generate eval standard
+eve-rails generate memory customer_profile --retention 180d
+eve-rails generate agent support --with-tools search_customers --with-skills triage_customer_issue --with-channels eve --with-schedules weekday_triage --with-evals standard --with-memory customer_profile --approval required --auth platform-oauth --visibility internal
+eve-rails apply manifests/agents.yml
 cd agents/support
 npm install
 npm run typecheck

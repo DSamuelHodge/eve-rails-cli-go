@@ -1,8 +1,8 @@
 /target/
 
 # Go
-/eve-rails-cli-go
-/eve-rails-cli-go.exe
+/eve-rails
+/eve-rails.exe
 *.test
 *.out
 /dist/
